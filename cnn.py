@@ -1,4 +1,6 @@
 # Import required libraries
+import logging
+import datetime
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -13,13 +15,14 @@ import torch.nn.functional as F
 """
 Changes Made:
 1. Moved hyperparameters to a global dict to make tracking and changing values easier
-2. Fixed some hyperparameters (batch_size specifically) being hardcoded in some places (DataLoaders)
+2. Fixed some hyperparameters (batch_size specifically) being hardcoded in some places
 3. batch_size value was never used
 4. Revised model training to track validation & training losses and accuracies in lists
 5. Implemented display_graphs to track model fitting based on those tracked values (called in train_model)
 """
 
-# TODO: Implement Optuna hyperparameter trials from project 2
+# TODO: Implement Optuna hyperparameter tuning trials from project 2
+# TODO: Check out Tensorboard for logging & visualization
 
 class ImprovedCNN(nn.Module):
     def __init__(self):
@@ -55,6 +58,17 @@ hyperparameters = {
     "gamma": 0.5
 
 }
+# Configure logging
+logging.basicConfig(
+    filename="training.log",  # Log file name
+    level=logging.INFO,  # Log level
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Log format
+    datefmt="%Y-%m-%d %H:%M:%S",  # Timestamp format
+)
+
+logging.info("\n" + "="*20)
+logging.info(f"New Training Run Started at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+logging.info("="*20 + "\n")
 
 def data_preparation():
     # Enhanced Data Augmentation and Data Loading
@@ -204,9 +218,9 @@ def train_model(device, model, train_loader, val_loader, criterion, optimizer, s
         val_losses.append(val_loss / len(val_loader))
         val_accuracies.append(val_accuracy)
 
-        print(f"Epoch [{epoch + 1}/{num_epochs}], "
-              f"Train Loss: {train_losses[-1]:.4f}, Train Accuracy: {train_accuracies[-1]:.2f}%, "
-              f"Validation Loss: {val_losses[-1]:.4f}, Validation Accuracy: {val_accuracies[-1]:.2f}%")
+        logging.info(f"Epoch [{epoch + 1}/{num_epochs}], Train Loss: {train_losses[-1]:.4f}, Train Accuracy: {train_accuracies[-1]:.2f}%, Validation Loss: {val_losses[-1]:.4f}, Validation Accuracy: {val_accuracies[-1]:.2f}%")
+
+        print(f"Epoch [{epoch + 1}/{num_epochs}], Train Loss: {train_losses[-1]:.4f}, Train Accuracy: {train_accuracies[-1]:.2f}%, Validation Loss: {val_losses[-1]:.4f}, Validation Accuracy: {val_accuracies[-1]:.2f}%")
 
         scheduler.step()  # Adjust learning rate
     display_graphs(train_losses, val_losses, train_accuracies, val_accuracies)
@@ -224,6 +238,7 @@ def evaluate_model(device, model, test_loader):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
     accuracy = 100 * correct / total
+    logging.info("Test Accuracy of the model on the CIFAR-10 test images: {accuracy:.2f}%")
     print(f"Test Accuracy of the model on the CIFAR-10 test images: {accuracy:.2f}%")
     return accuracy
 
@@ -270,7 +285,7 @@ def main():
     """
     # Train and Validate the Model
     train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler, hyperparameters["num_epochs"])
-
+    evaluate_model(device, model, test_loader)
     """
     # Define class names
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
