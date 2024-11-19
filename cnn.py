@@ -22,8 +22,6 @@ Changes Made:
 4. Revised model training to track validation & training losses and accuracies in lists
 5. Implemented display_graphs to track model fitting based on those tracked values (called in train_model)
 """
-
-# TODO: Implement Optuna hyperparameter tuning trials from project 2
 # TODO: Check out Tensorboard for logging & visualization
 
 class ImprovedCNN(nn.Module):
@@ -123,12 +121,18 @@ def objective(device, trial):
     gamma = trial.suggest_float("gamma", 0.1, 0.9)
     step_size = trial.suggest_int("step_size", 5, 10)
 
+
+    print(f"Starting Trial #{trial.number+1}")
+    logging.info(f"Starting Trial #{trial.number+1}")
+
     # Update hyperparameter set
     hyperparameters["learning_rate"] = learning_rate
     hyperparameters["num_epochs"] = num_epochs
     hyperparameters["gamma"] = gamma
     hyperparameters["step_size"] = step_size
     hyperparameters["batch_size"] = suggested_batch_size
+
+    logging.info(f"Trial Hyperparameters: {json.dumps(hyperparameters, indent=2)}")
     # Data preparation
     _, _, _, train_loader, val_loader, _ = data_preparation(suggested_batch_size)
 
@@ -140,7 +144,7 @@ def objective(device, trial):
 
     # Training loop for objective
     best_val_accuracy = 0
-    for epoch in range(num_epochs):
+    for epoch in range(hyperparameters["num_epochs"]):
         train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler, display=False)
         val_accuracy = evaluate_model(device, model, val_loader)
         best_val_accuracy = max(best_val_accuracy, val_accuracy)
@@ -162,7 +166,7 @@ def autotune():
     study = optuna.create_study(direction="maximize", pruner=optuna.pruners.MedianPruner())
 
     # Use lambda to pass device
-    study.optimize(lambda trial: objective(device, trial), n_trials=50)
+    study.optimize(lambda trial: objective(device, trial), n_trials=30)
 
     # Print the best hyperparameters and accuracy
     print(f"Best hyperparameters: {study.best_params}")
@@ -232,6 +236,7 @@ def display_graphs(train_losses, val_losses, train_accuracies, val_accuracies):
 
 
 def train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler, display=True):
+    print(json.dumps(hyperparameters, indent=2))
     train_losses, val_losses, train_accuracies, val_accuracies = [], [], [], []
 
     for epoch in range(hyperparameters["num_epochs"]):
