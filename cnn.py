@@ -1,4 +1,5 @@
 # Import required libraries
+import optuna
 import json
 import logging
 import datetime
@@ -53,9 +54,9 @@ class ImprovedCNN(nn.Module):
 
 hyperparameters = {
     "learning_rate": 0.001,
-    "num_epochs": 15,
-    "batch_size": 128,
-    "step_size": 10,
+    "num_epochs": 30,
+    "batch_size": 64,
+    "step_size": 5,
     "gamma": 0.5
 
 }
@@ -71,7 +72,7 @@ logging.info("\n" + "="*20)
 logging.info(f"New Training Run Started at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nHyperparameters: {json.dumps(hyperparameters, indent=2)}")
 logging.info("="*20 + "\n")
 
-def data_preparation():
+def data_preparation(batch_size=hyperparameters["batch_size"]):
     # Enhanced Data Augmentation and Data Loading
     transform_train = transforms.Compose([
         transforms.RandomHorizontalFlip(),
@@ -91,7 +92,7 @@ def data_preparation():
 
     # Load the CIFAR-10 dataset with enhanced augmentations
     full_train_dataset = datasets.CIFAR10(root='./data', train=True, download=True,
-                                          transform=transform_train)  # train=True specifies that full_train_dataset is the training portion of CIFAR-10. The training dataset is 50,0000 images.
+                                          transform=transform_train)  # train=True specifies that full_train_dataset is the training portion of CIFAR-10. The training dataset is 50,000 images.
     test_dataset = datasets.CIFAR10(root='./data', train=False, download=True,
                                     transform=transform_test)  # train=False specifies that test_dataset is the test portion of CIFAR-10. The test version of the dataset is 10,000 images.
 
@@ -102,9 +103,9 @@ def data_preparation():
     train_dataset, val_dataset = random_split(full_train_dataset, [train_size, val_size])
 
     # Create data loaders for training, validation, and test datasets
-    train_loader = DataLoader(train_dataset, batch_size=hyperparameters["batch_size"], shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=hyperparameters["batch_size"], shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=hyperparameters["batch_size"], shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     print(f"Training samples: {len(train_dataset)}")
     print(f"Validation samples: {len(val_dataset)}")
@@ -113,6 +114,63 @@ def data_preparation():
     return train_dataset, val_dataset, test_dataset, train_loader, val_loader, test_loader
 
 # Visualization of Augmented and Unaltered Images
+
+def objective(device, trial):
+    # Suggest hyperparameters
+    suggested_batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
+    learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
+    num_epochs = trial.suggest_int("num_epochs", 10, 30)
+    gamma = trial.suggest_float("gamma", 0.1, 0.9)
+    step_size = trial.suggest_int("step_size", 5, 10)
+
+    # Update hyperparameter set
+    hyperparameters["learning_rate"] = learning_rate
+    hyperparameters["num_epochs"] = num_epochs
+    hyperparameters["gamma"] = gamma
+    hyperparameters["step_size"] = step_size
+    hyperparameters["batch_size"] = suggested_batch_size
+    # Data preparation
+    _, _, _, train_loader, val_loader, _ = data_preparation(suggested_batch_size)
+
+    # Initialize model, loss, and optimizer
+    model = ImprovedCNN().to(device)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+
+    # Training loop for objective
+    best_val_accuracy = 0
+    for epoch in range(num_epochs):
+        train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler, display=False)
+        val_accuracy = evaluate_model(device, model, val_loader)
+        best_val_accuracy = max(best_val_accuracy, val_accuracy)
+
+        # Log intermediate results
+        trial.report(val_accuracy, epoch)
+
+        # If the trial is pruned, stop early
+        if trial.should_prune():
+            raise optuna.exceptions.TrialPruned()
+
+    return best_val_accuracy
+
+
+def autotune():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    study = optuna.create_study(direction="maximize", pruner=optuna.pruners.MedianPruner())
+
+    # Use lambda to pass device
+    study.optimize(lambda trial: objective(device, trial), n_trials=50)
+
+    # Print the best hyperparameters and accuracy
+    print(f"Best hyperparameters: {study.best_params}")
+    print(f"Best validation accuracy: {study.best_value}")
+
+    # Log results to file
+    logging.info(f"Best hyperparameters: {study.best_params}")
+    logging.info(f"Best validation accuracy: {study.best_value}")
 
 def visualize_data(loader, title, num_images=5):
     data_iter = iter(loader)
@@ -172,19 +230,18 @@ def display_graphs(train_losses, val_losses, train_accuracies, val_accuracies):
     plt.legend()
     plt.show()
 
-def train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs):
-    # Initialize lists to store metrics
+
+def train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler, display=True):
     train_losses, val_losses, train_accuracies, val_accuracies = [], [], [], []
 
-    for epoch in range(num_epochs):
-        # Training phase
+    for epoch in range(hyperparameters["num_epochs"]):
         model.train()
         running_loss = 0.0
         train_correct = 0
         train_total = 0
 
         for images, labels in train_loader:
-            images, labels = images.to(device), labels.to(device)
+            images, labels = images.to(device), labels.to(device)  # Move inputs to device
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -207,7 +264,7 @@ def train_model(device, model, train_loader, val_loader, criterion, optimizer, s
         val_total = 0
         with torch.no_grad():
             for images, labels in val_loader:
-                images, labels = images.to(device), labels.to(device)
+                images, labels = images.to(device), labels.to(device)  # Move inputs to device
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 val_loss += loss.item()
@@ -219,13 +276,14 @@ def train_model(device, model, train_loader, val_loader, criterion, optimizer, s
         val_losses.append(val_loss / len(val_loader))
         val_accuracies.append(val_accuracy)
 
-        logging.info(f"Epoch [{epoch + 1}/{num_epochs}], Train Loss: {train_losses[-1]:.4f}, Train Accuracy: {train_accuracies[-1]:.2f}%, Validation Loss: {val_losses[-1]:.4f}, Validation Accuracy: {val_accuracies[-1]:.2f}%")
+        logging.info(f"Epoch [{epoch + 1}/{hyperparameters['num_epochs']}], Train Loss: {train_losses[-1]:.4f}, Train Accuracy: {train_accuracies[-1]:.2f}%, Validation Loss: {val_losses[-1]:.4f}, Validation Accuracy: {val_accuracies[-1]:.2f}%")
 
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Train Loss: {train_losses[-1]:.4f}, Train Accuracy: {train_accuracies[-1]:.2f}%, Validation Loss: {val_losses[-1]:.4f}, Validation Accuracy: {val_accuracies[-1]:.2f}%")
+        print(f"Epoch [{epoch + 1}/{hyperparameters['num_epochs']}], Train Loss: {train_losses[-1]:.4f}, Train Accuracy: {train_accuracies[-1]:.2f}%, Validation Loss: {val_losses[-1]:.4f}, Validation Accuracy: {val_accuracies[-1]:.2f}%")
 
-        scheduler.step()  # Adjust learning rate
-    display_graphs(train_losses, val_losses, train_accuracies, val_accuracies)
-
+        scheduler.step()
+    # Hacky solution to prevent 50 graphs from generating during trials
+    if display:
+        display_graphs(train_losses, val_losses, train_accuracies, val_accuracies)
 # Evaluation Function
 def evaluate_model(device, model, test_loader):
     model.eval()
@@ -233,16 +291,16 @@ def evaluate_model(device, model, test_loader):
     total = 0
     with torch.no_grad():
         for images, labels in test_loader:
-            images, labels = images.to(device), labels.to(device)
+            images, labels = images.to(device), labels.to(device)  # Move inputs to device
             outputs = model(images)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+
     accuracy = 100 * correct / total
-    logging.info("Test Accuracy of the model on the CIFAR-10 test images: {accuracy:.2f}%")
+    logging.info(f"Test Accuracy of the model on the CIFAR-10 test images: {accuracy:}%")
     print(f"Test Accuracy of the model on the CIFAR-10 test images: {accuracy:.2f}%")
     return accuracy
-
 # Function to Plot Sample Predictions
 def plot_sample_predictions(device, model, test_loader, classes):
     model.eval()
@@ -285,8 +343,10 @@ def main():
     visualize_unaltered_images(val_dataset, test_dataset)
     """
     # Train and Validate the Model
-    train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler, hyperparameters["num_epochs"])
+    train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler)
+    # Call the export function after training the model
     evaluate_model(device, model, test_loader)
+
     """
     # Define class names
     classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
@@ -296,4 +356,5 @@ def main():
     """
 
 if __name__ == "__main__":
-    main()
+    #main()
+    autotune()
