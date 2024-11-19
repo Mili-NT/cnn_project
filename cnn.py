@@ -1,4 +1,5 @@
 # Import required libraries
+import json
 import logging
 import datetime
 import torch
@@ -67,7 +68,7 @@ logging.basicConfig(
 )
 
 logging.info("\n" + "="*20)
-logging.info(f"New Training Run Started at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+logging.info(f"New Training Run Started at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nHyperparameters: {json.dumps(hyperparameters, indent=2)}")
 logging.info("="*20 + "\n")
 
 def data_preparation():
