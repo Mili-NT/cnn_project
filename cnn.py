@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.data import random_split
+import torch.nn.functional as F
 
 """
 Changes Made:
@@ -29,7 +30,18 @@ class ImprovedCNN(nn.Module):
 
         # First block
         self.block1 = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, padding=1),
+            nn.Conv2d(3, 32, kernel_size=3, padding=1),  # Reduced filters
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)  # Downsample by 2
+        )
+
+        # Second block
+        self.block2 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
@@ -38,83 +50,64 @@ class ImprovedCNN(nn.Module):
             nn.MaxPool2d(2, 2)  # Downsample by 2
         )
 
-        # Second block
-        self.block2 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2)  # Downsample by 2
-        )
-
         # Third block
         self.block3 = nn.Sequential(
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(),
             nn.MaxPool2d(2, 2)  # Downsample by 2
         )
 
         # Fourth block
         self.block4 = nn.Sequential(
-            nn.Conv2d(256, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
-            nn.ReLU(),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.MaxPool2d(2, 2)  # Downsample by 2
         )
 
-        # Fifth block
-        self.block5 = nn.Sequential(
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
-            nn.ReLU(),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 1))  # Global average pooling
-        )
+        # Global average pooling instead of fully connected layers
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # Fully connected layers
-        self.fc1 = nn.Sequential(
-            nn.Linear(512, 512),
-            nn.BatchNorm1d(512),
+        # Fully connected layer
+        self.fc = nn.Sequential(
+            nn.Linear(256, 128),  # Reduced FC layer complexity
             nn.ReLU(),
-            nn.Dropout(0.5)
+            nn.Dropout(0.5),
+            nn.Linear(128, 10)
         )
-        self.fc2 = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(0.5)
-        )
-        self.fc3 = nn.Linear(256, 10)
 
     def forward(self, x):
         x = self.block1(x)
         x = self.block2(x)
         x = self.block3(x)
         x = self.block4(x)
-        x = self.block5(x)
-
-        x = x.view(x.size(0), -1)  # Flatten the tensor
-        x = self.fc1(x)
-        x = self.fc2(x)
-        x = self.fc3(x)
+        x = self.global_avg_pool(x)
+        x = x.view(x.size(0), -1)  # Flatten
+        x = self.fc(x)
         return x
+
+class LabelSmoothingCrossEntropy(nn.Module):
+    def __init__(self, smoothing=0.1):
+        super(LabelSmoothingCrossEntropy, self).__init__()
+        self.smoothing = smoothing
+
+    def forward(self, logits, target):
+        num_classes = logits.size(-1)
+        log_probs = F.log_softmax(logits, dim=-1)
+
+        with torch.no_grad():
+            true_dist = torch.zeros_like(log_probs)
+            true_dist.fill_(self.smoothing / (num_classes - 1))
+            true_dist.scatter_(1, target.unsqueeze(1), 1 - self.smoothing)
+
+        return torch.mean(torch.sum(-true_dist * log_probs, dim=-1))
 
 
 hyperparameters =  {
     'batch_size': 256,
     'learning_rate': 0.00029547769932519556,
-    'num_epochs': 700,
+    'num_epochs': 45,
     'gamma': 0.1342360529056426,
     'step_size': 15
 }
@@ -198,7 +191,7 @@ def objective(device, trial):
 
     # Initialize model, loss, and optimizer
     model = ImprovedCNN().to(device)
-    criterion = nn.CrossEntropyLoss()
+    criterion = LabelSmoothingCrossEntropy(smoothing=0.1)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
 
