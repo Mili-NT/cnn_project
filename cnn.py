@@ -12,7 +12,6 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.data import random_split
-import torch.nn.functional as F
 
 """
 Changes Made:
@@ -27,40 +26,68 @@ Changes Made:
 class ImprovedCNN(nn.Module):
     def __init__(self):
         super(ImprovedCNN, self).__init__()
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
-        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(256, 512, kernel_size=3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.dropout = nn.Dropout(0.5)
 
-        self.fc1 = nn.Linear(512 * 2 * 2, 512)
-        self.fc2 = nn.Linear(512, 256)
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(256, 512, kernel_size=3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)
+        )
+
+        self.fc1 = nn.Sequential(
+            nn.Linear(512 * 2 * 2, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.5)
+        )
+        self.fc2 = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.5)
+        )
         self.fc3 = nn.Linear(256, 10)
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = self.pool(F.relu(self.conv3(x)))
-        x = self.pool(F.relu(self.conv4(x)))
-        x = x.view(-1, 512 * 2 * 2)
-        x = F.relu(self.fc1(x))
-        x = self.dropout(x)
-        x = F.relu(self.fc2(x))
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        x = x.view(-1, 512 * 2 * 2)  # Flatten the tensor
+        x = self.fc1(x)
+        x = self.fc2(x)
         x = self.fc3(x)
         return x
 
-hyperparameters = {
-    "learning_rate": 0.001,
-    "num_epochs": 30,
-    "batch_size": 64,
-    "step_size": 5,
-    "gamma": 0.5
 
+hyperparameters =  {
+    'batch_size': 256,
+    'learning_rate': 0.00029547769932519556,
+    'num_epochs': 300,
+    'gamma': 0.1342360529056426,
+    'step_size':30
 }
 # Configure logging
 logging.basicConfig(
-    filename="training.log",  # Log file name
+    filename="training.log",  # Log file na me
     level=logging.INFO,  # Log level
     format="%(asctime)s - %(levelname)s - %(message)s",  # Log format
     datefmt="%Y-%m-%d %H:%M:%S",  # Timestamp format
@@ -361,5 +388,5 @@ def main():
     """
 
 if __name__ == "__main__":
-    #main()
-    autotune()
+    main()
+    #autotune()
