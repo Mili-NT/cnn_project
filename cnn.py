@@ -1,5 +1,4 @@
 # Import required libraries
-import optuna
 import json
 import logging
 import datetime
@@ -24,24 +23,14 @@ Changes Made:
 """
 # TODO: Check out Tensorboard for logging & visualization
 
+
 class ImprovedCNN(nn.Module):
     def __init__(self):
         super(ImprovedCNN, self).__init__()
 
-        # First block
+        # First Block
         self.block1 = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, padding=1),  # Reduced filters
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.Conv2d(32, 32, kernel_size=3, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.MaxPool2d(2, 2)  # Downsample by 2
-        )
-
-        # Second block
-        self.block2 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Conv2d(3, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
@@ -50,28 +39,39 @@ class ImprovedCNN(nn.Module):
             nn.MaxPool2d(2, 2)  # Downsample by 2
         )
 
-        # Third block
-        self.block3 = nn.Sequential(
+        # Second Block
+        self.block2 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
             nn.MaxPool2d(2, 2)  # Downsample by 2
         )
 
-        # Fourth block
-        self.block4 = nn.Sequential(
+        # Third Block
+        self.block3 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=3, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.MaxPool2d(2, 2)  # Downsample by 2
         )
 
-        # Global average pooling instead of fully connected layers
+        # Fourth Block
+        self.block4 = nn.Sequential(
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.MaxPool2d(2, 2)  # Downsample by 2
+        )
+
+        # Global Average Pooling
         self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
-        # Fully connected layer
+        # Fully Connected Layer
         self.fc = nn.Sequential(
-            nn.Linear(256, 128),  # Reduced FC layer complexity
+            nn.Linear(256, 128),
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(128, 10)
@@ -86,6 +86,7 @@ class ImprovedCNN(nn.Module):
         x = x.view(x.size(0), -1)  # Flatten
         x = self.fc(x)
         return x
+
 
 class LabelSmoothingCrossEntropy(nn.Module):
     def __init__(self, smoothing=0.1):
@@ -105,9 +106,9 @@ class LabelSmoothingCrossEntropy(nn.Module):
 
 
 hyperparameters =  {
-    'batch_size': 256,
+    'batch_size': 128,
     'learning_rate': 0.00029547769932519556,
-    'num_epochs': 45,
+    'num_epochs': 30,
     'gamma': 0.1342360529056426,
     'step_size': 15
 }
@@ -120,19 +121,31 @@ logging.basicConfig(
 )
 
 logging.info("\n" + "="*20)
+
 logging.info(f"New Training Run Started at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nHyperparameters: {json.dumps(hyperparameters, indent=2)}")
 logging.info("="*20 + "\n")
 
 def data_preparation(batch_size=hyperparameters["batch_size"]):
     # Enhanced Data Augmentation and Data Loading
     transform_train = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(15),
-        transforms.RandomCrop(32, padding=4),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        transforms.RandomHorizontalFlip(),  # Equivalent to horizontal_flip=True
+        transforms.RandomRotation(20),  # Increased to match rotation_range=20
+        transforms.RandomAffine(
+            degrees=0,
+            translate=(0.2, 0.2)  # Equivalent to width_shift_range=0.2, height_shift_range=0.2
+        ),
+        transforms.ColorJitter(
+            brightness=0.2,
+            contrast=0.2,
+            saturation=0.2,
+            hue=0.1  # Similar to channel_shift_range=50
+        ),
+        transforms.RandomCrop(32, padding=4),  # Maintained for random cropping
+        transforms.ToTensor(),  # Converts images to tensors
+        transforms.Normalize(
+            mean=(0.4914, 0.4822, 0.4465),
+            std=(0.2023, 0.1994, 0.2010)
+        ),  # Normalization
     ])
 
     # Normalization the data based on the mean and strd deviation values of the CIFAR-10 dataset
@@ -165,69 +178,6 @@ def data_preparation(batch_size=hyperparameters["batch_size"]):
     return train_dataset, val_dataset, test_dataset, train_loader, val_loader, test_loader
 
 # Visualization of Augmented and Unaltered Images
-
-def objective(device, trial):
-    # Suggest hyperparameters
-    suggested_batch_size = trial.suggest_categorical("batch_size", [32, 64, 128])
-    learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
-    num_epochs = trial.suggest_int("num_epochs", 10, 30)
-    gamma = trial.suggest_float("gamma", 0.1, 0.9)
-    step_size = trial.suggest_int("step_size", 5, 10)
-
-
-    print(f"Starting Trial #{trial.number+1}")
-    logging.info(f"Starting Trial #{trial.number+1}")
-
-    # Update hyperparameter set
-    hyperparameters["learning_rate"] = learning_rate
-    hyperparameters["num_epochs"] = num_epochs
-    hyperparameters["gamma"] = gamma
-    hyperparameters["step_size"] = step_size
-    hyperparameters["batch_size"] = suggested_batch_size
-
-    logging.info(f"Trial Hyperparameters: {json.dumps(hyperparameters, indent=2)}")
-    # Data preparation
-    _, _, _, train_loader, val_loader, _ = data_preparation(suggested_batch_size)
-
-    # Initialize model, loss, and optimizer
-    model = ImprovedCNN().to(device)
-    criterion = LabelSmoothingCrossEntropy(smoothing=0.1)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
-
-    # Training loop for objective
-    best_val_accuracy = 0
-    for epoch in range(hyperparameters["num_epochs"]):
-        train_model(device, model, train_loader, val_loader, criterion, optimizer, scheduler, display=False)
-        val_accuracy = evaluate_model(device, model, val_loader)
-        best_val_accuracy = max(best_val_accuracy, val_accuracy)
-
-        # Log intermediate results
-        trial.report(val_accuracy, epoch)
-
-        # If the trial is pruned, stop early
-        if trial.should_prune():
-            raise optuna.exceptions.TrialPruned()
-
-    return best_val_accuracy
-
-
-def autotune():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    study = optuna.create_study(direction="maximize", pruner=optuna.pruners.MedianPruner())
-
-    # Use lambda to pass device
-    study.optimize(lambda trial: objective(device, trial), n_trials=30)
-
-    # Print the best hyperparameters and accuracy
-    print(f"Best hyperparameters: {study.best_params}")
-    print(f"Best validation accuracy: {study.best_value}")
-
-    # Log results to file
-    logging.info(f"Best hyperparameters: {study.best_params}")
-    logging.info(f"Best validation accuracy: {study.best_value}")
 
 def visualize_data(loader, title, num_images=5):
     data_iter = iter(loader)
